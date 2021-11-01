@@ -1,0 +1,16 @@
+sample,deployment,location,tib_dd_tot,fasc_dd_tot,tib_drag,tib_abr,tib_ra,tib_gf,fasc_drag,fasc_abr,fasc_ra,fasc_gf,tib_base,fasc_base
+6-TR-BLUE-2,6,conweb,85,70,71,7,4,3,0,7,58,5,24,26
+6-TR-PINK-2,6,conweb,110,107,92,6,5,7,0,8,92,7,28,24
+1-TR-BLUE-1,1,conweb,195,54,162,14,7,12,0,5,45,4,68,14
+4-TR-YELLOW-1,4,corner,119,47,98,9,10,2,0,4,37,6,39,8
+2-TR-YELLOW-1,2,corner,132,38,109,14,5,4,0,2,33,3,51,8
+2-TR-YELLOW-2,2,corner,103,54,82,14,5,2,0,2,46,6,33,12
+2-TR-PINK-1,2,conweb,211,45,182,13,6,10,0,3,37,5,65,4
+4-TR-PINK-2,4,conweb,119,56,96,14,7,2,0,2,51,3,1,1
+3-TR-YELLOW-2,3,corner,160,56,138,12,7,3,0,5,45,6,42,12
+4-TR-PINK-1,4,conweb,61,26,50,6,2,3,0,2,23,1,23,2
+5-TR-YELLOW-2,5,corner,125,70,113,6,4,2,0,5,62,3,12,14
+6-TR-PINK-1,6,conweb,155,185,133,8,6,8,0,12,166,7,8,16
+5-TR-YELLOW-1,5,corner,182,138,163,1,9,9,0,11,117,10,39,48
+1-TR-PINK-1,1,conweb,213,30,186,12,10,5,0,4,24,2,38,6
+5-TR-BLUE-1,5,conweb,127,80,107,6,12,2,0,3,73,4,22,19
