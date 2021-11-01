@@ -1,0 +1,1309 @@
+---
+title: "Dillon_et_al_2021_MEPS"
+author: "Erin Dillon"
+date: "September 29, 2021"
+output: html_document
+---
+
+This .Rmd file accompanies the following dataset and paper:
+
+Dataset citation: Dillon, Erin et al. (2021), Data from: Dermal denticle shedding rates vary between two captive shark species, Dryad, Dataset
+
+Paper citation: Dillon et al. (2021) Dermal denticle shedding rates vary between two captive shark species. Marine Ecology Progress Series. https://doi.org/10.3354/meps13936
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+knitr::opts_knit$set(root.dir = "C:/Users/erin_/Documents/UCSB PhD/Manuscripts/AOP denticle shedding/Dryad data archiving/DillonMEPS2021_SupData_Denticle_Shedding_csv_files")
+
+```
+
+# Load libraries
+```{r}
+
+library(car)
+library(glmmTMB)
+library(DHARMa)
+library(AICcmodavg)
+library(MuMIn)
+library(plotrix)
+library(gtools)
+library(userfriendlyscience)
+library(tidyverse)
+library(RColorBrewer)
+library(scales)
+
+```
+
+# Load data
+read.csv(here::here("ChangesInRedList","rl_status_history_2007_2018_genuine.csv"))
+## Denticle shedding data
+```{r}
+
+shed_raw <- read.csv("1_DillonMEPS2021_SupData_Denticle_Shedding_counts.csv",header=T,na.strings = ".")
+
+
+#shark surface area estimated as ellisoid (m2)
+tiburo_sa_e <- 0.37 
+fasciatum_sa_e <- 1.03
+
+#shark counts in the tank
+no_tiburo <- 2
+no_fasciatum <- 3
+sharks_tot <- 5
+
+
+#calculate shedding rate values  
+shed <- shed_raw %>% 
+  mutate(deployment_num=deployment,
+         dd_per_kg_subsample=dd_tot/(subsample_g/1000),
+         dd_whole_sample_est=dd_tot*subsample_frac, #estimated number of denticles in whole sample
+         dd_per_day=dd_whole_sample_est/deploy_time_days, #total denticles shed across all sharks
+         dd_per_shark_tiburo=(dd_tiburo*subsample_frac)/no_tiburo, #denticles shed per bonnethead
+         dd_per_shark_fasciatum=(dd_fasciatum*subsample_frac)/no_fasciatum, #denticles shed per zebra shark
+         ratio=dd_per_shark_tiburo/dd_per_shark_fasciatum, #ratio of denticles shed by bonnethead:zebra shark
+         dd_per_tiburo_per_day=dd_per_shark_tiburo/deploy_time_days, #denticles shed per day per bonnethead shark 
+         dd_per_fasciatum_per_day=dd_per_shark_fasciatum/deploy_time_days, #denticles shed per day per zebra shark 
+         dd_per_tiburo_per_day_per_m=dd_per_tiburo_per_day*(1/0.10229), #denticles shed per day per bonnethead shark per m2 (SHEDDING RATE)
+         dd_per_fasciatum_per_day_per_m=dd_per_fasciatum_per_day*(1/0.10229), #denticles shed per day per zebra shark per m2 (SHEDDING RATE)
+         dd_per_day_per_m=dd_per_day*(1/0.10229), #total denticles shed across all sharks per m2
+         dd_per_shark_per_day_per_m_tot = (dd_per_day/5)*(1/0.10229), #denticles shed per shark per m2
+         
+         #CORRECTIONS
+         #denticle quantity: published denticle density * body SA mm2
+         dd_per_tiburo_per_day_ddquant_corr=dd_per_tiburo_per_day_per_m/(31*(tiburo_sa_e*1e+6)), 
+         dd_per_fasciatum_per_day_ddquant_corr=dd_per_fasciatum_per_day_per_m/(10*(fasciatum_sa_e*1e+6)),
+         
+         #shark behavior & space use 
+         dd_per_tiburo_per_day_space_corr = dd_per_tiburo_per_day_per_m/(1.5183824-0.33), #corrected for horizontal space use (e.g., offset from homogenous usage) 
+         dd_per_fasciatum_per_day_space_corr = dd_per_fasciatum_per_day_per_m/((1.6327869-0.33)*0.6), #corrected for horizontal space use and time spent sitting on tank bottom
+         
+         #non-experimental input
+         #input_corr variable represents denticles/g for each spp found in bulk samples
+         tib_corr = ((gain_g-sample_3mm_g)/subsample_frac)*input_corr_tiburo, #est number of bonnethead shark denticles per subsample that could have entered via non-experimental input 
+         fasc_corr = ((gain_g-sample_3mm_g)/subsample_frac)*input_corr_fasciatum, #est number of zebra shark denticles per subsample that could have entered via non-experimental input
+         dd_per_tiburo_per_day_input_corr = (((dd_tiburo-tib_corr)*subsample_frac)/no_tiburo)/deploy_time_days, 
+         dd_per_fasciatum_per_day_input_corr = (((dd_fasciatum-fasc_corr)*subsample_frac)/no_fasciatum)/deploy_time_days,
+         dd_per_tiburo_per_day_per_m_input_corr = dd_per_tiburo_per_day_input_corr*(1/0.10229),
+         dd_per_fasciatum_per_day_per_m_input_corr= dd_per_fasciatum_per_day_input_corr*(1/0.10229),
+         
+         #all corrections
+         tiburo_tot_corr=(31*(tiburo_sa_e*1e+6))*(1.5183824-0.33),
+         fasciatum_tot_corr=(10*(fasciatum_sa_e*1e+6))*((1.6327869-0.33)*0.6),
+         dd_per_tiburo_per_day_tot_corr = dd_per_tiburo_per_day_per_m_input_corr/tiburo_tot_corr,
+         dd_per_fasciatum_per_day_tot_corr = dd_per_fasciatum_per_day_per_m_input_corr/fasciatum_tot_corr)
+
+shed$deployment <- as.factor(shed$deployment)
+
+```
+
+longform - raw
+```{r}
+
+#make relevant shedding data longform
+shed_sub <- shed %>% 
+  dplyr::select(deployment,deployment_num,month,location_color_code,sample,deploy_time_days,location,daylength_dec,dd_per_tiburo_per_day_per_m,dd_per_fasciatum_per_day_per_m) %>% 
+  rename(tiburo=dd_per_tiburo_per_day_per_m,fasciatum=dd_per_fasciatum_per_day_per_m)
+
+shed_long <- gather(shed_sub,species,dd_per_day_per_shark_per_m,tiburo:fasciatum)
+
+#re-level months
+shed_long$month <- factor(shed_long$month, levels = c("July", "August", "September","October","January","February"))
+
+```
+
+longform - denticle quantity correction
+```{r}
+
+#make relevant shedding data longform
+shed_sub_sa <- shed %>% 
+  dplyr::select(deployment,deployment_num,month,location_color_code,sample,deploy_time_days,location,daylength_dec,dd_per_tiburo_per_day_ddquant_corr,dd_per_fasciatum_per_day_ddquant_corr) %>% 
+  rename(tiburo=dd_per_tiburo_per_day_ddquant_corr,fasciatum=dd_per_fasciatum_per_day_ddquant_corr)
+
+shed_long_sa <- gather(shed_sub_sa,species,dd_per_day_per_shark_ddquant_corr,tiburo:fasciatum)
+
+#re-level months
+shed_long_sa$month <- factor(shed_long_sa$month, levels = c("July", "August", "September","October","January","February"))
+
+```
+
+longform - shark space use correction
+```{r}
+
+#make relevant shedding data longform
+shed_sub_behav <- shed %>% 
+  dplyr::select(deployment,deployment_num,month,location_color_code,sample,deploy_time_days,location,daylength_dec,dd_per_tiburo_per_day_space_corr,dd_per_fasciatum_per_day_space_corr) %>% 
+  rename(tiburo=dd_per_tiburo_per_day_space_corr,fasciatum=dd_per_fasciatum_per_day_space_corr)
+
+shed_long_behav <- gather(shed_sub_behav,species,dd_per_day_per_shark_behav,tiburo:fasciatum)
+
+#re-level months
+shed_long_behav$month <- factor(shed_long_behav$month, levels = c("July", "August", "September","October","January","February"))
+
+```
+
+longform - non-experimental input correction
+```{r}
+
+#make relevant shedding data longform
+shed_sub_input <- shed %>% 
+  dplyr::select(deployment,deployment_num,month,location_color_code,sample,deploy_time_days,location,daylength_dec,dd_per_tiburo_per_day_per_m_input_corr,dd_per_fasciatum_per_day_per_m_input_corr) %>% 
+  rename(tiburo=dd_per_tiburo_per_day_per_m_input_corr,fasciatum=dd_per_fasciatum_per_day_per_m_input_corr)
+
+shed_long_input <- gather(shed_sub_input,species,dd_per_day_per_shark_input,tiburo:fasciatum)
+
+#re-level months
+shed_long_input$month <- factor(shed_long_input$month, levels = c("July", "August", "September","October","January","February"))
+
+```
+
+longform - all corrections together
+```{r}
+
+#make relevant shedding data longform
+shed_sub_tot_corr <- shed %>% 
+  dplyr::select(deployment,deployment_num,month,location_color_code,sample,deploy_time_days,location,daylength_dec,dd_per_tiburo_per_day_tot_corr,dd_per_fasciatum_per_day_tot_corr) %>% 
+  rename(tiburo=dd_per_tiburo_per_day_tot_corr,fasciatum=dd_per_fasciatum_per_day_tot_corr)
+
+shed_long_tot_corr <- gather(shed_sub_tot_corr,species,dd_per_day_per_shark_tot_corr,tiburo:fasciatum)
+
+#re-level months 
+shed_long_tot_corr$month <- factor(shed_long_tot_corr$month, levels = c("July", "August", "September","October","January","February"))
+
+```
+
+
+## Weathering score data
+```{r}
+
+aop_taph <- read.csv("2_DillonMEPS2021_SupData_Denticle_Shedding_weathering.csv",header=T,na.strings=".")
+ 
+#calculate total weathering scores (each individual score is equally weighted prior to being summed)
+aop_taph_sc <- aop_taph %>% 
+  mutate(tot_frag_score=(taph_base/2)+(taph_crown/3)+taph_peaks,
+         tot_score=tot_frag_score+(surf_alt/3)+(discolor/2))
+
+```
+
+
+## Behavior data
+```{r}
+
+focalfol <- read.csv("5_DillonMEPS2021_SupData_Denticle_Shedding_behavior.csv",na.strings=".", header=TRUE)
+
+#survey metadata
+focalfol_meta <- focalfol %>% 
+  dplyr::select(id,date,month,species,individual,dive_show_feeding,dive_show,time_of_day,start_time,end_time,tot_time_min) %>% 
+  distinct()
+
+#proportional data (& means, where appropriate) for each observation per survey id
+focalfol_sum <- focalfol %>%
+  group_by(id) %>% 
+  summarize(prop_T_pos=length(which(pos_in_tank_v == "T"))/length(pos_in_tank_v),
+            prop_M_pos=length(which(pos_in_tank_v == "M"))/length(pos_in_tank_v),
+            prop_B_pos=length(which(pos_in_tank_v == "B"))/length(pos_in_tank_v),
+            prop_C_pos=length(which(pos_in_tank_h == "C"))/length(pos_in_tank_h),
+            prop_W_pos=length(which(pos_in_tank_h == "W"))/length(pos_in_tank_h),
+            prop_T_activ=length(which(activ_state == "T"))/length(activ_state),
+            prop_RB_activ=length(which(activ_state == "R(B)"))/length(activ_state),
+            mean_tail_beat = mean(tail_beats_10sec,na.rm=T),
+            rubbing_reef=mean(rubbing_reef),
+            rubbing_walls=mean(rubbing_walls),
+            rubbing_bot=mean(rubbing_bot),
+            rubbing_interaction=mean(rubbing_interaction))
+
+#rejoin metadata
+focalfol_join <- focalfol_sum %>% 
+  left_join(focalfol_meta,focalfol_sum,by="id") %>% 
+  arrange(species)
+
+#re-level time of day
+focalfol_join$time_of_day <- factor(focalfol_join$time_of_day, levels = c("Morning","Afternoon","Evening"))
+
+```
+
+
+# Analyses
+
+## Denticle shedding rates (methods section 2.2)
+
+### Test for differences across tray locations
+```{r}
+
+#summary of differences across trays
+shed %>% 
+  group_by(deployment,location_color_code) %>% 
+  summarize(dd_per_day_mean=mean(dd_per_day_per_m)) %>% 
+  group_by(deployment) %>% 
+  summarize(dd_per_day_dif=max(dd_per_day_mean)/min(dd_per_day_mean))
+
+#anova
+fit_locality <- lm(dd_per_day_per_m~location_color_code,data=shed)
+plot(fit_locality)
+qqPlot(fit_locality$residuals)
+shapiro.test(fit_locality$residuals)
+leveneTest(dd_per_day~location_color_code,data=shed) 
+anova(fit_locality) 
+
+```
+
+### Differences across deployments
+```{r}
+
+#summary of differences across deployments
+shed %>% 
+  group_by(deployment) %>% 
+  summarize(mean_dd_day=mean(dd_per_day_per_m,na.rm=T),
+            mean_ratio=mean(ratio,na.rm=T),
+            mean_dd_tib=mean(dd_per_tiburo_per_day_per_m,na.rm=T),
+            mean_dd_fasc=mean(dd_per_fasciatum_per_day_per_m,na.rm=T))
+
+```
+
+### Test for differences across shark species (raw)
+
+amount of difference
+```{r}
+
+#bonnethead shark mean
+tib_mean <- mean(shed_long$dd_per_day_per_shark_per_m[shed_long$species=="tiburo"]) 
+
+#zebra shark mean
+fasc_mean <- mean(shed_long$dd_per_day_per_shark_per_m[shed_long$species=="fasciatum"]) 
+
+#mean magnitude of difference
+tib_mean/fasc_mean
+
+#by deployment
+shed_long %>% 
+  group_by(deployment) %>% 
+  summarize(factor_dif=mean(dd_per_day_per_shark_per_m[species=="tiburo"])/mean(dd_per_day_per_shark_per_m[species=="fasciatum"]))
+
+```
+
+glmm
+```{r}
+
+#build models
+mod1_spp <- glmmTMB(dd_per_day_per_shark_per_m~species+(1|location_color_code)+(1|month),data=shed_long,family=Gamma(link='log'),REML=F)
+
+mod_null_spp <- glmmTMB(dd_per_day_per_shark_per_m~1+(1|location_color_code)+(1|month),data=shed_long,family=Gamma(link='log'),REML=F)
+
+#compare models
+AICc(mod1_spp);AICc(mod_null_spp)
+aictab(list(mod1_spp,mod_null_spp), c("mod1","null"))
+
+#lrt
+anova(mod1_spp,mod_null_spp)
+summary(mod1_spp)
+
+#check diagmostics
+mod1_spp_sim <- simulateResiduals(mod1_spp,n=1000)
+plot(mod1_spp_sim)
+
+```
+
+
+### Test for differences across shark species (corrections)
+
+#### Correction: denticle quantity
+
+amount of difference
+```{r}
+
+#bonnethead shark mean
+tib_mean_sa <- mean(shed_long_sa$dd_per_day_per_shark_ddquant_corr[shed_long_sa$species=="tiburo"]) 
+
+#zebra shark mean
+fasc_mean_sa <- mean(shed_long_sa$dd_per_day_per_shark_ddquant_corr[shed_long_sa$species=="fasciatum"])
+
+#mean magnitude of difference
+tib_mean_sa/fasc_mean_sa 
+
+#by deployment
+shed %>%
+  group_by(deployment) %>% 
+  summarize(fact_dif=mean(dd_per_tiburo_per_day_ddquant_corr)/mean(dd_per_fasciatum_per_day_ddquant_corr))
+
+```
+
+glmm
+```{r}
+
+#build models
+#note: with both random effects included, there was a model convergence issue (and r.e. variance was very low)
+mod1_sa <- glmmTMB(dd_per_day_per_shark_ddquant_corr~species+(1|month),data=shed_long_sa,family=Gamma(link='log'),REML=F)
+
+mod_null_sa <- glmmTMB(dd_per_day_per_shark_ddquant_corr~1+(1|month),data=shed_long_sa,family=Gamma(link='log'),REML=F)
+
+#compare models
+AICc(mod1_sa);AICc(mod_null_sa)
+aictab(list(mod1_sa,mod_null_sa), c("mod1","null"))
+
+#lrt
+anova(mod1_sa,mod_null_sa)
+summary(mod1_sa)
+
+#check diagnostics
+mod1_sa_sim <- simulateResiduals(mod1_sa,n=1000)
+plot(mod1_sa_sim)
+
+
+```
+
+#### Correction: shark space use
+
+amount of difference
+```{r}
+
+#bonnethead shark mean
+tib_mean_space <- mean(shed$dd_per_tiburo_per_day_space_corr)
+
+#zebra shark mean
+fasc_mean_space <- mean(shed$dd_per_fasciatum_per_day_space_corr)
+
+#mean magnitude of difference
+tib_mean_space/fasc_mean_space 
+
+#by deployment
+shed %>%
+  group_by(deployment) %>% 
+  summarize(fact_dif=mean(dd_per_tiburo_per_day_space_corr)/mean(dd_per_fasciatum_per_day_space_corr))
+
+```
+
+glmm
+```{r}
+
+#build models
+#note: with both random effects included, there was a model convergence issue (and r.e. variance was very low)
+mod1_behav <- glmmTMB(dd_per_day_per_shark_behav~species+(1|month),data=shed_long_behav,family=Gamma(link='log'),REML=F)
+
+mod_null_behav <- glmmTMB(dd_per_day_per_shark_behav~1+(1|month),data=shed_long_behav,family=Gamma(link='log'),REML=F)
+
+#compare models
+AICc(mod1_behav);AICc(mod_null_behav)
+aictab(list(mod1_behav,mod_null_behav), c("mod1","null"))
+
+#lrt
+anova(mod1_behav,mod_null_behav)
+summary(mod1_behav)
+
+#check diagnostics
+mod1_behav_sim <- simulateResiduals(mod1_behav,n=1000)
+plot(mod1_behav_sim)
+
+```
+
+#### Correction: non-experimental input
+
+amount of difference
+```{r}
+
+#bonnethead shark mean
+tib_mean_input <- mean(shed$dd_per_tiburo_per_day_per_m_input_corr)
+
+#zebra shark mean
+fasc_mean_input <- mean(shed$dd_per_fasciatum_per_day_per_m_input_corr)
+
+#mean magnitude of difference
+tib_mean_input/fasc_mean_input 
+
+#by deployment
+shed %>%
+  group_by(deployment) %>% 
+  summarize(fact_dif=mean(dd_per_tiburo_per_day_input_corr)/mean(dd_per_fasciatum_per_day_input_corr))
+
+```
+
+glmm
+```{r}
+
+#build models
+#note: with both random effects included, there was a model convergence issue (and r.e. variance was very low)
+mod1_input <- glmmTMB(dd_per_day_per_shark_input~species+(1|month),data=shed_long_input,family=Gamma(link='log'),REML=F)
+
+mod_null_input <- glmmTMB(dd_per_day_per_shark_input~1+(1|month),data=shed_long_input,family=Gamma(link='log'),REML=F)
+
+#compare models
+AICc(mod1_input);AICc(mod_null_input)
+aictab(list(mod1_input,mod_null_input), c("mod1","null"))
+
+#lrt
+anova(mod1_input,mod_null_input)
+summary(mod1_input)
+
+#check diagnostics
+mod1_input_sim <- simulateResiduals(mod1_input,n=1000)
+plot(mod1_input_sim)
+
+
+```
+
+#### Correction: all
+
+amount of difference
+```{r}
+
+#bonnethead shark mean
+tib_mean_tot_corr <- mean(shed$dd_per_tiburo_per_day_tot_corr)
+
+#zebra shark mean
+fasc_mean_tot_corr <- mean(shed$dd_per_fasciatum_per_day_tot_corr)
+
+#mean magnitude of difference
+tib_mean_tot_corr/fasc_mean_tot_corr 
+
+#by deployment
+shed %>%
+  group_by(deployment) %>% 
+  summarize(fact_dif=mean(dd_per_tiburo_per_day_tot_corr)/mean(dd_per_fasciatum_per_day_tot_corr))
+
+```
+
+glmm
+```{r}
+
+#build models
+#note: with both random effects included, there was a model convergence issue (and r.e. variance was very low)
+mod1_tot_corr <- glmmTMB(dd_per_day_per_shark_tot_corr~species+(1|month),data=shed_long_tot_corr,family=Gamma(link='log'),REML=F)
+
+mod_null_tot_corr <- glmmTMB(dd_per_day_per_shark_tot_corr~1+(1|month),data=shed_long_tot_corr,family=Gamma(link='log'),REML=F)
+
+#compare models
+AICc(mod1_tot_corr);AICc(mod_null_tot_corr)
+aictab(list(mod1_tot_corr,mod_null_tot_corr), c("mod1","null"))
+
+#lrt
+anova(mod1_tot_corr,mod_null_tot_corr)
+summary(mod1_tot_corr)
+
+#check diagnostics
+mod1_tot_corr_sim <- simulateResiduals(mod1_tot_corr,n=1000)
+plot(mod1_tot_corr_sim)
+
+```
+
+
+## Weathering analysis (methods section 2.4)
+```{r}
+
+#weathering score summary
+taph_summ <- aop_taph_sc %>% 
+  group_by(species) %>% 
+  summarize(overall_frag_avg=mean(tot_frag_score,na.rm=T),
+            overall_frag_sd=sd(tot_frag_score,na.rm=T),
+            overall_frag_median=median(tot_frag_score,na.rm=T),
+            overall_frag_mad=mad(tot_frag_score,na.rm=T),
+            overall_score_avg=mean(tot_score,na.rm=T))
+taph_summ
+
+mean(aop_taph_sc$tot_frag_score)
+sd(aop_taph_sc$tot_frag_score)
+median(aop_taph_sc$tot_frag_score) 
+mad(aop_taph_sc$tot_frag_score) 
+
+
+#frequency of fragmentation of peaks & crown (n=300)
+length(which(aop_taph_sc$taph_peaks==1))/length(aop_taph_sc$unique)*100
+
+aop_taph_sc %>% 
+  filter(taph_crown==1 |taph_crown==2 | taph_peaks==1) %>% 
+  summarize(freq=length(unique)/300*100) 
+
+aop_taph_sc %>% 
+  filter(taph_crown==1 |taph_crown==2) %>% 
+  summarize(freq=length(unique)/300*100) 
+
+
+aop_taph_sc %>% #peak fragmentation in drag reduction denticles
+  filter(func_morph=='DR' & taph_peaks==1) %>% 
+  summarize(freq=length(unique)/117*100) 
+
+length(which(aop_taph_sc$func_morph=='DR')) #117
+
+aop_taph_sc %>% #vs. peak fragmentation in other morphotypes
+  filter(func_morph!='DR' & taph_peaks==1) %>% 
+  summarize(freq=length(unique)/183*100) 
+
+length(which(aop_taph_sc$func_morph!='DR')) #183
+
+
+#base preservation
+base_morph <- aop_taph_sc %>% 
+  group_by(func_morph) %>%
+  summarize(perc_base = length(which(taph_base==0))/length(unique)*100,
+            base_score_mean=mean(taph_base,na.rm=T),
+            base_score_median=median(taph_base,na.rm=T))
+base_morph
+
+taph_base_fit <- lm(taph_base~func_morph,aop_taph_sc)
+qqPlot(taph_base_fit$residuals)
+shapiro.test(taph_base_fit$residuals) 
+leveneTest(taph_base~func_morph,aop_taph_sc) 
+
+kruskal.test(taph_base~func_morph,aop_taph_sc)
+wilcox.test(taph_base~species,aop_taph_sc)
+
+
+#weathering scores across deployments
+taph_deploy_fit <- lm(tot_frag_score~as.factor(deployment), aop_taph_sc)
+qqPlot(taph_deploy_fit$residuals)
+shapiro.test(taph_deploy_fit$residuals)
+leveneTest(tot_frag_score~as.factor(deployment), aop_taph_sc) 
+
+kruskal.test(tot_frag_score~as.factor(deployment), aop_taph_sc) 
+
+
+#weathering scores across tank locations
+taph_loc_frag_fit <-lm(tot_frag_score~location, aop_taph_sc)
+qqPlot(taph_loc_frag_fit$residuals)
+shapiro.test(taph_loc_frag_fit$residuals)
+leveneTest(tot_frag_score~location, aop_taph_sc) 
+
+wilcox.test(tot_frag_score~location, aop_taph_sc)
+
+
+#weathering scores across functional morph
+taph_summ_morph <- aop_taph_sc %>% 
+  group_by(func_morph) %>% 
+  summarize(overall_frag_avg=mean(tot_frag_score,na.rm=T),
+            overall_frag_sd=sd(tot_frag_score,na.rm=T),
+            overall_score_avg=mean(tot_score,na.rm=T),
+            overall_frag_median=median(tot_frag_score,na.rm=T),
+            overall_frag_mad=mad(tot_frag_score,na.rm=T))
+taph_summ_morph
+
+
+taph_morph_frag_fit <- lm(tot_frag_score~func_morph,aop_taph_sc)
+plot(taph_morph_frag_fit)
+qqPlot(taph_morph_frag_fit$residuals)
+shapiro.test(taph_morph_frag_fit$residuals)
+leveneTest(tot_frag_score~func_morph, aop_taph_sc)
+
+oneway.test(tot_frag_score~func_morph,aop_taph_sc,var.equal=FALSE) #welch's anova
+
+oneway(aop_taph_sc$func_morph, y = aop_taph_sc$tot_frag_score, posthoc = 'games-howell') #posthoc test
+
+
+```
+
+
+## Shark behavior (methods section 2.5)
+
+### Summary
+```{r}
+
+#frequency of behaviors by shark species
+focalfol %>%
+  group_by(species) %>% 
+  summarize(prop_T_pos=length(which(pos_in_tank_v == "T"))/length(pos_in_tank_v),
+            prop_M_pos=length(which(pos_in_tank_v == "M"))/length(pos_in_tank_v),
+            prop_B_pos=length(which(pos_in_tank_v == "B"))/length(pos_in_tank_v),
+            prop_C_pos=length(which(pos_in_tank_h == "C"))/length(pos_in_tank_h),
+            prop_W_pos=length(which(pos_in_tank_h == "W"))/length(pos_in_tank_h),
+            prop_T_activ=length(which(activ_state == "T"))/length(activ_state),
+            prop_RB_activ=length(which(activ_state == "R(B)"))/length(activ_state))
+
+
+#frequency of observations in the outer third of the tank (spp in aggregate)
+focalfol %>% 
+  summarize(prop_W_pos=length(which(pos_in_tank_h == "W"))/length(pos_in_tank_h))
+
+
+#frequency of rubbing on aquarium sides (spp in aggregate)
+focalfol_join %>%
+  mutate(rub_tank_per_min = rubbing_walls/tot_time_min) %>% 
+  summarize(mean_rub_per_min = mean(rub_tank_per_min),
+            sd_rub_per_min = sd(rub_tank_per_min))
+
+
+```
+
+### Model: activity state
+```{r}
+
+#binomial response (whether or not shark is traveling)
+focalfol_binom <- focalfol %>%
+  mutate(activ_T=case_when(
+    activ_state=='T'~1,
+    activ_state=='R(B)'~0))
+
+
+#build models
+mod1_activ_show <- glmmTMB(activ_T~species*time_of_day*dive_show+(1|date),family='binomial',data=focalfol_binom,REML=F) #model convergence issue
+
+mod2_activ_show <- glmmTMB(activ_T~species*time_of_day+(1|date),family='binomial',data=focalfol_binom,REML=F)
+
+
+mod3_activ_show <- glmmTMB(activ_T~time_of_day*dive_show+(1|date),family='binomial',data=focalfol_binom,REML=F) 
+
+mod4_activ_show <- glmmTMB(activ_T~species*dive_show+(1|date),family='binomial',data=focalfol_binom,REML=F)
+
+mod5_activ_show <- glmmTMB(activ_T~species+time_of_day+dive_show+(1|date),family='binomial',data=focalfol_binom,REML=F)
+
+mod6_activ_show <- glmmTMB(activ_T~species+time_of_day+(1|date),family='binomial',data=focalfol_binom,REML=F)
+
+mod7_activ_show <- glmmTMB(activ_T~species+dive_show+(1|date),family='binomial',data=focalfol_binom,REML=F)
+
+mod8_activ_show <- glmmTMB(activ_T~time_of_day+dive_show+(1|date),family='binomial',data=focalfol_binom,REML=F)
+
+mod9_activ_show <- glmmTMB(activ_T~species+(1|date),family='binomial',data=focalfol_binom,REML=F)
+
+mod10_activ_show <- glmmTMB(activ_T~time_of_day+(1|date),family='binomial',data=focalfol_binom,REML=F)
+
+mod11_activ_show <- glmmTMB(activ_T~dive_show+(1|date),family='binomial',data=focalfol_binom,REML=F)
+
+mod12_activ_show <- glmmTMB(activ_T~1+(1|date),family='binomial',data=focalfol_binom,REML=F)
+
+
+#model comparison
+AICc(mod1_activ_show);AICc(mod2_activ_show);AICc(mod3_activ_show);AICc(mod4_activ_show);AICc(mod5_activ_show);AICc(mod6_activ_show);AICc(mod7_activ_show);AICc(mod8_activ_show);AICc(mod9_activ_show);AICc(mod10_activ_show);AICc(mod11_activ_show);AICc(mod12_activ_show) 
+
+aictab(list(mod2_activ_show,mod3_activ_show,mod4_activ_show,mod5_activ_show,mod6_activ_show,mod7_activ_show,mod8_activ_show,mod9_activ_show,mod10_activ_show,mod11_activ_show,mod12_activ_show), c("mod2","mod3","mod4","mod5","mod6","mod7","mod8","mod9","mod10","mod11","mod12"))
+
+
+#lrt
+anova(mod6_activ_show,mod5_activ_show)#test dive show sig
+anova(mod7_activ_show,mod5_activ_show)#test time of time sig
+anova(mod8_activ_show,mod5_activ_show)#test species sig
+summary(mod5_activ_show)
+
+
+#model diagnostics
+mod5_activ_sim <- simulateResiduals(mod5_activ_show,n=1000)
+plot(mod5_activ_sim)
+
+
+```
+
+
+### Model: horizontal position in the tank
+```{r}
+
+#binomial response (whether or not shark is in outer third of tank)
+focalfol_binom_h <- focalfol %>%
+  mutate(pos_W=case_when(
+    pos_in_tank_h=='W'~1,
+    pos_in_tank_h=='C'~0))
+
+
+#build models
+mod1_hpos_show <- glmmTMB(pos_W~species*time_of_day*dive_show+(1|date),family='binomial',data=focalfol_binom_h,REML=F) 
+
+mod2_hpos_show <- glmmTMB(pos_W~species*time_of_day+(1|date),family='binomial',data=focalfol_binom_h,REML=F)
+
+mod3_hpos_show <- glmmTMB(pos_W~time_of_day*dive_show+(1|date),family='binomial',data=focalfol_binom_h,REML=F) 
+
+mod4_hpos_show <- glmmTMB(pos_W~species*dive_show+(1|date),family='binomial',data=focalfol_binom_h,REML=F)
+
+mod5_hpos_show <- glmmTMB(pos_W~species+time_of_day+dive_show+(1|date),family='binomial',data=focalfol_binom_h,REML=F)
+
+mod6_hpos_show <- glmmTMB(pos_W~species+time_of_day+(1|date),family='binomial',data=focalfol_binom_h,REML=F)
+
+mod7_hpos_show <- glmmTMB(pos_W~species+dive_show+(1|date),family='binomial',data=focalfol_binom_h,REML=F)
+
+mod8_hpos_show <- glmmTMB(pos_W~time_of_day+dive_show+(1|date),family='binomial',data=focalfol_binom_h,REML=F)
+
+mod9_hpos_show <- glmmTMB(pos_W~species+(1|date),family='binomial',data=focalfol_binom_h,REML=F)
+
+mod10_hpos_show <- glmmTMB(pos_W~time_of_day+(1|date),family='binomial',data=focalfol_binom_h,REML=F)
+
+mod11_hpos_show <- glmmTMB(pos_W~dive_show+(1|date),family='binomial',data=focalfol_binom_h,REML=F)
+
+mod12_hpos_show <- glmmTMB(pos_W~1+(1|date),family='binomial',data=focalfol_binom_h,REML=F)
+
+
+#model comparison
+AICc(mod1_hpos_show);AICc(mod2_hpos_show);AICc(mod3_hpos_show);AICc(mod4_hpos_show);AICc(mod5_hpos_show);AICc(mod6_hpos_show);AICc(mod7_hpos_show);AICc(mod8_hpos_show);AICc(mod9_hpos_show);AICc(mod10_hpos_show);AICc(mod11_hpos_show);AICc(mod12_hpos_show) 
+
+aictab(list(mod2_hpos_show,mod3_hpos_show,mod4_hpos_show,mod5_hpos_show,mod6_hpos_show,mod7_hpos_show,mod8_hpos_show,mod9_hpos_show,mod10_hpos_show,mod11_hpos_show,mod12_hpos_show), c("mod2","mod3","mod4","mod5","mod6","mod7","mod8","mod9","mod10","mod11","mod12"))
+
+
+#lrt
+anova(mod9_hpos_show,mod4_hpos_show) #test dive show sig
+anova(mod11_hpos_show,mod4_hpos_show) #test species sig
+anova(mod7_hpos_show,mod4_hpos_show) #test interaction sig
+summary(mod4_hpos_show)
+
+
+#model diagnostics
+mod4_hpos_sim <- simulateResiduals(mod4_hpos_show,n=1000)
+plot(mod4_hpos_sim)
+
+mod5_hpos_sim <- simulateResiduals(mod5_hpos_show,n=1000)
+plot(mod5_hpos_sim)
+
+```
+
+### Model: vertical position in the tank
+```{r}
+
+#binomial response (whether or not shark is in bottom third of tank)
+focalfol_binom_v <- focalfol %>%
+  mutate(pos_b=case_when(
+    pos_in_tank_v=='B'~1,
+    pos_in_tank_v=='M'~0,
+    pos_in_tank_v=='T'~0))
+
+
+#build models
+mod1_vpos_show <- glmmTMB(pos_b~species*time_of_day*dive_show+(1|date),family='binomial',data=focalfol_binom_v,REML=F) #model convergence issue
+
+mod2_vpos_show <- glmmTMB(pos_b~species*time_of_day+(1|date),family='binomial',data=focalfol_binom_v,REML=F)
+
+mod3_vpos_show <- glmmTMB(pos_b~time_of_day*dive_show+(1|date),family='binomial',data=focalfol_binom_v,REML=F) 
+
+mod4_vpos_show <- glmmTMB(pos_b~species*dive_show+(1|date),family='binomial',data=focalfol_binom_v,REML=F)
+
+mod5_vpos_show <- glmmTMB(pos_b~species+time_of_day+dive_show+(1|date),family='binomial',data=focalfol_binom_v,REML=F)
+
+mod6_vpos_show <- glmmTMB(pos_b~species+time_of_day+(1|date),family='binomial',data=focalfol_binom_v,REML=F)
+
+mod7_vpos_show <- glmmTMB(pos_b~species+dive_show+(1|date),family='binomial',data=focalfol_binom_v,REML=F)
+
+mod8_vpos_show <- glmmTMB(pos_b~time_of_day+dive_show+(1|date),family='binomial',data=focalfol_binom_v,REML=F)
+
+mod9_vpos_show <- glmmTMB(pos_b~species+(1|date),family='binomial',data=focalfol_binom_v,REML=F)
+
+mod10_vpos_show <- glmmTMB(pos_b~time_of_day+(1|date),family='binomial',data=focalfol_binom_v,REML=F)
+
+mod11_vpos_show <- glmmTMB(pos_b~dive_show+(1|date),family='binomial',data=focalfol_binom_v,REML=F)
+
+mod12_vpos_show <- glmmTMB(pos_b~1+(1|date),family='binomial',data=focalfol_binom_v,REML=F)
+
+
+#model comparison
+AICc(mod1_vpos_show);AICc(mod2_vpos_show);AICc(mod3_vpos_show);AICc(mod4_vpos_show);AICc(mod5_vpos_show);AICc(mod6_vpos_show);AICc(mod7_vpos_show);AICc(mod8_vpos_show);AICc(mod9_vpos_show);AICc(mod10_vpos_show);AICc(mod11_vpos_show);AICc(mod12_vpos_show) 
+
+aictab(list(mod2_vpos_show,mod3_vpos_show,mod4_vpos_show,mod5_vpos_show,mod6_vpos_show,mod7_vpos_show,mod8_vpos_show,mod9_vpos_show,mod10_vpos_show,mod11_vpos_show,mod12_vpos_show), c("mod2","mod3","mod4","mod5","mod6","mod7","mod8","mod9","mod10","mod11","mod12"))
+
+
+#lrt
+anova(mod6_vpos_show,mod5_vpos_show) #test dive show sig 
+anova(mod7_vpos_show,mod5_vpos_show) #test time of day sig
+anova(mod8_vpos_show,mod5_vpos_show) #test species sig
+summary(mod5_vpos_show)
+
+
+#model diagnostics
+mod5_vpos_sim <- simulateResiduals(mod5_vpos_show,n=1000)
+plot(mod5_vpos_sim)
+
+
+```
+
+### Model: total contact with the tank
+```{r}
+
+#counts by survey id
+focalfol_int <- focalfol %>%
+  mutate(rubbing_tot=rubbing_reef+rubbing_walls+rubbing_bot) %>% 
+  group_by(id,species,time_of_day,date,tot_time_min,dive_show) %>% 
+  summarize(rubbing_tot=mean(rubbing_tot),
+            interact_tot=mean(rubbing_interaction))
+
+
+#build models
+mod1_int_show <- glmmTMB(rubbing_tot~species*time_of_day*dive_show+(1|date)+offset(log(tot_time_min)),family='nbinom2',data=focalfol_int,REML=F) 
+
+mod2_int_show <- glmmTMB(rubbing_tot~species*time_of_day+(1|date)+offset(log(tot_time_min)),family='nbinom2',data=focalfol_int,REML=F)
+
+mod3_int_show <- glmmTMB(rubbing_tot~time_of_day*dive_show+(1|date)+offset(log(tot_time_min)),family='nbinom2',data=focalfol_int,REML=F) 
+
+mod4_int_show <- glmmTMB(rubbing_tot~species*dive_show+(1|date)+offset(log(tot_time_min)),family='nbinom2',data=focalfol_int,REML=F) 
+
+mod5_int_show <- glmmTMB(rubbing_tot~species+time_of_day+dive_show+(1|date)+offset(log(tot_time_min)),family='nbinom2',data=focalfol_int,REML=F)
+
+mod6_int_show <- glmmTMB(rubbing_tot~species+time_of_day+(1|date)+offset(log(tot_time_min)),family='nbinom2',data=focalfol_int,REML=F)
+
+mod7_int_show <- glmmTMB(rubbing_tot~species+dive_show+(1|date)+offset(log(tot_time_min)),family='nbinom2',data=focalfol_int,REML=F)
+
+mod8_int_show <- glmmTMB(rubbing_tot~time_of_day+dive_show+(1|date)+offset(log(tot_time_min)),family='nbinom2',data=focalfol_int,REML=F)
+
+mod9_int_show <- glmmTMB(rubbing_tot~species+(1|date)+offset(log(tot_time_min)),family='nbinom2',data=focalfol_int,REML=F)
+
+mod10_int_show <- glmmTMB(rubbing_tot~time_of_day+(1|date)+offset(log(tot_time_min)),family='nbinom2',data=focalfol_int,REML=F)
+
+mod11_int_show <- glmmTMB(rubbing_tot~dive_show+(1|date)+offset(log(tot_time_min)),family='nbinom2',data=focalfol_int,REML=F)
+
+mod12_int_show <- glmmTMB(rubbing_tot~1+(1|date)+offset(log(tot_time_min)),family='nbinom2',data=focalfol_int,REML=F)
+
+
+#model comparison
+AICc(mod1_int_show);AICc(mod2_int_show);AICc(mod3_int_show);AICc(mod4_int_show);AICc(mod5_int_show);AICc(mod6_int_show);AICc(mod7_int_show);AICc(mod8_int_show);AICc(mod9_int_show);AICc(mod10_int_show);AICc(mod11_int_show);AICc(mod12_int_show)
+
+aictab(list(mod2_int_show,mod3_int_show,mod4_int_show,mod5_int_show,mod6_int_show,mod7_int_show,mod8_int_show,mod9_int_show,mod10_int_show,mod11_int_show,mod12_int_show), c("mod2","mod3","mod4","mod5","mod6","mod7","mod8","mod9","mod10","mod11","mod12"))
+
+
+#lrt
+anova(mod6_int_show,mod9_int_show) #test time of day sig
+anova(mod6_int_show,mod10_int_show) #test species sig
+
+
+#model diagnostics
+mod6_int_sim <- simulateResiduals(mod6_int_show,n=1000)
+plot(mod6_int_sim)
+
+mod5_int_sim <- simulateResiduals(mod5_int_show,n=1000)
+plot(mod5_int_sim)
+
+
+```
+
+### Model: interactions with other large animals in the tank
+```{r}
+
+#build models
+mod1_interact_show <- glmmTMB(interact_tot~species*time_of_day*dive_show+(1|date)+offset(log(tot_time_min)),family='nbinom2',data=focalfol_int,REML=F) 
+
+mod2_interact_show <- glmmTMB(interact_tot~species*time_of_day+(1|date)+offset(log(tot_time_min)),family='nbinom2',data=focalfol_int,REML=F)
+
+mod3_interact_show <- glmmTMB(interact_tot~time_of_day*dive_show+(1|date)+offset(log(tot_time_min)),family='nbinom2',data=focalfol_int,REML=F) 
+
+mod4_interact_show <- glmmTMB(interact_tot~species*dive_show+(1|date)+offset(log(tot_time_min)),family='nbinom2',data=focalfol_int,REML=F) 
+
+mod5_interact_show <- glmmTMB(interact_tot~species+time_of_day+dive_show+(1|date)+offset(log(tot_time_min)),family='nbinom2',data=focalfol_int,REML=F)
+
+mod6_interact_show <- glmmTMB(interact_tot~species+time_of_day+(1|date)+offset(log(tot_time_min)),family='nbinom2',data=focalfol_int,REML=F)
+
+mod7_interact_show <- glmmTMB(interact_tot~species+dive_show+(1|date)+offset(log(tot_time_min)),family='nbinom2',data=focalfol_int,REML=F)
+
+mod8_interact_show <- glmmTMB(interact_tot~time_of_day+dive_show+(1|date)+offset(log(tot_time_min)),family='nbinom2',data=focalfol_int,REML=F)
+
+mod9_interact_show <- glmmTMB(interact_tot~species+(1|date)+offset(log(tot_time_min)),family='nbinom2',data=focalfol_int,REML=F)
+
+mod10_interact_show <- glmmTMB(interact_tot~time_of_day+(1|date)+offset(log(tot_time_min)),family='nbinom2',data=focalfol_int,REML=F)
+
+mod11_interact_show <- glmmTMB(interact_tot~dive_show+(1|date)+offset(log(tot_time_min)),family='nbinom2',data=focalfol_int,REML=F)
+
+mod12_interact_show <- glmmTMB(interact_tot~1+(1|date)+offset(log(tot_time_min)),family='nbinom2',data=focalfol_int,REML=F)
+
+
+#model comparison
+AICc(mod1_interact_show);AICc(mod2_interact_show);AICc(mod3_interact_show);AICc(mod4_interact_show);AICc(mod5_interact_show);AICc(mod6_interact_show);AICc(mod7_interact_show);AICc(mod8_interact_show);AICc(mod9_interact_show);AICc(mod10_interact_show);AICc(mod11_interact_show);AICc(mod12_interact_show)
+
+aictab(list(mod2_interact_show,mod3_interact_show,mod4_interact_show,mod5_interact_show,mod6_interact_show,mod7_interact_show,mod8_interact_show,mod9_interact_show,mod10_interact_show,mod11_interact_show,mod12_interact_show), c("mod2","mod3","mod4","mod5","mod6","mod7","mod8","mod9","mod10","mod11","mod12"))
+ 
+
+#model diagnostics (poor)
+mod5_interact_sim <- simulateResiduals(mod5_interact_show,n=1000)
+plot(mod5_interact_sim)
+
+mod10_interact_sim <- simulateResiduals(mod10_interact_show,n=1000)
+plot(mod10_interact_sim)
+
+
+```
+
+
+## Simulation (methods section 2.6)
+```{r}
+
+#variable definitions
+#z = number of zebra sharks
+#b = number of bonnethead sharks
+#sz = zebra shark shedding rate
+#sb = bonnethead shark shedding rate
+#dz = number of zebra shark denticles
+#db = number of bonnethead shark denticles
+
+
+#vary z and b from 0 to 10; all different permuations
+n <-  seq.int(from=0, to=10,by=1) #possible numbers of each shark spp
+
+perm <- permutations(n=11, r=2,v=n,repeats.allowed = T)
+colnames(perm) <- c("z","b")
+nrow(perm)
+head(perm)
+
+#create empty output matrix with same number of rows
+output <- matrix(NA,nrow=nrow(perm),ncol=15)
+head(output)
+
+
+#empirically measured shedding rates (denticles per shark per day per m2)
+sz <- mean(shed$dd_per_fasciatum_per_day_per_m)  
+sb <- mean(shed$dd_per_tiburo_per_day_per_m) 
+
+
+#simulate denticle assemblage given known shedding rates
+for(r in 1:nrow(perm)){
+      i <- perm[r,1]
+      j <- perm[r,2]
+      output[r, 1] <- i #zebra shark count
+      output[r, 2] <- j #bonnethead shark count
+      output[r,3] <- i+j #total shark count
+      output[r,4] <- i/(i+j) #ratio zebra shark
+      output[r,5] <- j/(i+j) #ratio bonnethead shark
+      output[r,6] <- j/i #ratio bonnethead/zebra (fast/slow)
+      dz <- i * sz * 90 #zebra shark denticles accumulating per 1m2 over 90 days
+      db <- j * sb * 90 #bonnethead shark denticles accumuating per 1m2 over 90 days
+      output[r, 7] <- dz
+      output[r, 8] <- db
+      dt <- dz + db #total simulated denticle accumulation per 1m2 over 90 days
+      output[r, 9] <- dt
+      output[r, 10] <- dz / dt #ratio zebra shark accumulation
+      output[r, 11] <- db / dt #ratio bonnethead shark accumulation
+      zebra_abr <- dz*0.073 #accumulation of abrasion strength denticles from zebra sharks
+      zebra_rabr <- dz*0.853 #accumulation of ridged abrasion strength denticles from zebra sharks
+      zebra_gf <- dz*0.074 #accumulation of generalized functions denticles from zebra sharks
+      bonnethead_dr <- db*0.845 #accumulation of drag reduction denticles from bonnethead sharks
+      bonnethead_abr <- db*0.073 #accumulation of abrasion strength denticles from bonnethead sharks
+      bonnethead_rabr <- db*0.048 #accumulation of ridged abrasion strength denticles from bonnethead sharks
+      bonnethead_gf <- db*0.034 #accumulation of generalized functions denticles from bonnethead sharks
+      output[r,12] <- bonnethead_dr #drag reduction accumulation
+      output[r,13] <- zebra_abr + bonnethead_abr #abrasion strength accumulation
+      output[r,14] <- zebra_rabr + bonnethead_rabr #ridged abrasion strength accumulation
+      output[r,15] <- zebra_gf + bonnethead_gf #generalized functions accumulation
+}
+
+#name columns
+colnames(output) <- c("z","b","tot_abund","prop_shark_z","prop_shark_b","ratio_b_z","dz","db","dt","prop_dd_z","prop_dd_b","count_dr","count_abr","count_rabr","count_gf")
+
+#make output into dataframe
+output_df <- as.data.frame(output)
+head(output_df)
+summary(output_df)
+
+
+#for plotting later
+output_df_func_ratio <- output_df %>% 
+  mutate(ratio_dr_abr_ra_comb=count_dr/(count_rabr+count_abr)) %>%
+  mutate(aop=ifelse(b==2 & z==3, "YES","NO")) %>% 
+  mutate(ratio_one=case_when(
+    round(ratio_dr_abr_ra_comb, 0)==1 ~"YES",
+    round(ratio_dr_abr_ra_comb, 0)!=1 ~"NO"
+  ))
+
+```
+
+
+# Data figures
+
+## Fig. 2
+```{r fig.height=5}
+
+plot_spp_v2 <- shed_long %>%
+  ggplot(aes(x=species, y=dd_per_day_per_shark_per_m))+ 
+  stat_boxplot(geom = "errorbar", width = 0.1) +
+  geom_boxplot(aes(fill=species))+
+  stat_summary(fun.y=mean, geom="point", shape=18, size=3, color="black", fill="black") +
+  geom_jitter(aes(fill=species),shape=21,color='gray40',alpha=0.6,size=1.5)+
+  theme_bw()+
+  scale_fill_manual(values=c("lightgoldenrod2","lightsteelblue3"),labels=c("S. fasciatum","S. tiburo"))+
+  labs(x="Species",y=expression(paste("Denticles shed shark"^"-1"," day"^"-1"," m"^"-2")),fill="Species")+
+  scale_x_discrete(limits=c("fasciatum","tiburo"),labels=c("Zebra shark \n(Stegostoma fasciatum)","Bonnethead shark \n(Sphyrna tiburo)"))+
+  coord_cartesian(ylim = c(0, 210))+
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())+
+  theme(axis.text = element_text(size=12),axis.title= element_text(size=16))+
+  theme(legend.text = element_text(size=12),legend.title = element_text(size=14))+
+  theme(axis.text=element_text(color="black",family="sans",hjust=0.5),axis.title= element_text(color="black",family="sans",hjust=0.5))+
+  theme(axis.text.x=element_text(face="italic"))+
+  theme(legend.position = "none")+
+  theme(aspect.ratio = 1)
+plot_spp_v2
+
+```
+
+## Fig. 3
+```{r fig.width=9}
+
+shed_summ_fig3 <- shed_long %>%
+  group_by(species,month) %>% 
+  summarize(mean_shed=mean(dd_per_day_per_shark_per_m,na.rm=T),
+            sd_shed=sd(dd_per_day_per_shark_per_m,na.rm=T),
+            se_shed=std.error(dd_per_day_per_shark_per_m,na.rm=T))
+
+shed_summ_fig3
+
+
+plot_season_v3 <- ggplot(shed_summ_fig3,aes(x=as.factor(month),y=mean_shed,group=species))+
+  geom_point(aes(color=species),size=3,position=position_dodge(.2))+
+  geom_line(aes(color=species),size=1,position=position_dodge(.2))+
+  geom_errorbar(aes(ymin=mean_shed-se_shed, ymax=mean_shed+se_shed,color=species), size=0.4, width=.2,position=position_dodge(.2))+
+  scale_color_manual(values=c("lightgoldenrod2","lightsteelblue3"),labels=c("Stegostoma fasciatum","Sphyrna tiburo"))+
+  labs(x="Deployment Month",y=expression(paste("Denticles shed shark"^"-1"," day"^"-1"," m"^"-2")),color="Species")+
+  theme_bw()+
+  scale_x_discrete(limits=c("July", "August", "September","October","January","February"),labels=c("Jun-Jul", "Jul-Aug", "Aug-Sept","Sept-Oct","Jan-Feb","Feb-Mar"))+
+  coord_cartesian(ylim = c(0, 170))+
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())+
+  theme(axis.text = element_text(size=12),axis.title= element_text(size=16))+
+  theme(legend.text = element_text(size=12),legend.title = element_text(size=14))+
+  theme(axis.text=element_text(color="black",family="sans",hjust=0.5),axis.title= element_text(color="black",family="sans",hjust=0.5))+
+  theme(legend.text=element_text(face="italic"))+
+  theme(legend.position = "bottom")+
+  theme(aspect.ratio = 0.8)
+plot_season_v3
+
+```
+
+## Fig. 4
+```{r fig.height=5}
+
+abund_breaks = c(0.1,0.3, 1, 3, 9)
+abund_labels=c(0.1,0.3,1,3,9)
+
+#total dd count by shark abundance
+sim_plot_tot_abund <- output_df %>% 
+  filter(z>=1 & b>=1) %>% 
+  ggplot(aes(x=tot_abund,y=(dt/1000)))+ 
+  geom_point(aes(fill=ratio_b_z),size=3.5,shape=21,color="gray20",stroke=0.5)+
+  labs(x="Shark abundance",y="Denticle accumulation (x1000)",fill="Bonnethead:Zebra \nshark ratio")+
+  scale_fill_gradient2(midpoint=0, low="lightgoldenrod3", mid="white",
+                     high="lightsteelblue3", space ="Lab",trans='log',na.value = "grey80",breaks=abund_breaks,labels=abund_labels)+
+  theme_bw()+
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())+
+  theme(axis.text = element_text(size=12),axis.title= element_text(size=16))+
+  theme(legend.text = element_text(size=12),legend.title = element_text(size=14))+
+  theme(axis.text=element_text(color="black",family="sans",hjust=0.5),axis.title= element_text(color="black",family="sans",hjust=0.5))+
+  theme(legend.position="bottom")+
+  theme(aspect.ratio = 1)
+sim_plot_tot_abund
+
+```
+
+## Fig. S3
+```{r fig.width=9}
+
+#panel A
+plot_space <- shed %>%
+  filter(location_color_code %in% c("pink","blue","yellow")) %>% #unk trays excluded
+  ggplot(aes(x=location_color_code, y=dd_per_day_per_m,fill=location))+
+  stat_boxplot(geom = "errorbar", width = 0.1) +
+  geom_boxplot()+
+  theme_bw()+
+  stat_summary(fun.y=mean, geom="point", shape=18, size=3, color="black", fill="black") +
+  scale_fill_manual(values=c("skyblue","skyblue4"), labels=c("Mesh enclosure (ME)", "Tank corner (TC)"))+
+  labs(x="Tray location",y=expression(paste("Denticles shed shark"^"-1"," day"^"-1"," m"^"-2")))+
+  labs(fill="Location Type")+
+  scale_x_discrete(limits=c("blue","pink","yellow"),labels=c("ME-1","ME-2","TC-1"))+
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())+
+  theme(axis.text = element_text(size=12),axis.title= element_text(size=16))+
+  theme(legend.text = element_text(size=12),legend.title = element_text(size=14))+
+  theme(axis.text=element_text(color="black",family="sans",hjust=0.5),axis.title= element_text(color="black",family="sans",hjust=0.5))+
+  theme(legend.position="none")+
+  theme(aspect.ratio = 1)
+plot_space
+
+
+#panel B
+dep_summ <- shed %>% 
+  group_by(location,month) %>% 
+  summarize(mean_dep=mean(dd_per_day_per_m))
+
+plot_space_b <- shed %>%
+  ggplot(aes(x=as.factor(month), y=dd_per_day_per_m,fill=location))+
+  stat_boxplot(geom = "errorbar", width = 0.1,position = position_dodge(width = 0.75)) +
+  geom_boxplot()+
+  theme_bw()+
+  geom_point(data=dep_summ,aes(x=month,y=mean_dep,group=location),position = position_dodge(width = 0.75), shape=18, size=3, color="black", fill="black")+
+  scale_fill_manual(values=c("skyblue","skyblue4"), labels=c("Mesh enclosure (ME)", "Tank corner (TC)"))+
+  labs(x="Deployment month",y="")+
+  labs(fill="Tray location")+
+  scale_x_discrete(limits=c("July", "August", "September","October","January","February"),labels=c("Jun-Jul", "Jul-Aug", "Aug-Sept","Sept-Oct","Jan-Feb","Feb-Mar"))+
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())+
+  theme(axis.text = element_text(size=12),axis.title= element_text(size=16))+
+  theme(legend.text = element_text(size=12),legend.title = element_text(size=14))+
+  theme(axis.text=element_text(color="black",family="sans",hjust=0.5),axis.title= element_text(color="black",family="sans",hjust=0.5))+
+  theme(legend.position="right",legend.direction = "vertical")+
+  theme(axis.title.y = element_blank())+
+  #theme(axis.text.x = element_text(angle = 45,hjust=1))
+  theme(aspect.ratio = 0.8)
+plot_space_b
+
+```
+
+## Fig. S4
+```{r fig.height=5}
+
+plot_season_tot <- shed %>%
+  ggplot(aes(x=as.factor(month), y=dd_per_shark_per_day_per_m_tot))+
+  stat_boxplot(geom = "errorbar", width = 0.1) +
+  geom_boxplot(fill="white")+
+  geom_jitter(color='gray60',alpha=0.6)+
+  stat_summary(fun.y=mean, geom="point", shape=18, size=3, color="black", fill="black") +
+  theme_bw()+
+  labs(x="Deployment month",y=expression(paste("Denticles shed shark"^"-1"," day"^"-1"," m"^"-2")))+
+  scale_x_discrete(limits=c("July", "August", "September","October","January","February"),labels=c("Jun-Jul", "Jul-Aug", "Aug-Sept","Sept-Oct","Jan-Feb","Feb-Mar"))+
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())+
+  theme(axis.text = element_text(size=12),axis.title= element_text(size=16))+
+  theme(legend.text = element_text(size=12),legend.title = element_text(size=14))+
+  theme(axis.text=element_text(color="black",family="sans",hjust=0.5),axis.title= element_text(color="black",family="sans",hjust=0.5))+
+  theme(aspect.ratio = 0.8)
+plot_season_tot
+
+```
+
+## Fig. S5
+```{r fig.width=11}
+
+shed_summ_loc <- shed_long %>%
+  group_by(location,species,month) %>% 
+  summarize(mean_shed=mean(dd_per_day_per_shark_per_m,na.rm=T),
+            sd_shed=sd(dd_per_day_per_shark_per_m,na.rm=T),
+            se_shed=std.error(dd_per_day_per_shark_per_m,na.rm=T))
+shed_summ_loc
+
+levels(shed_summ_loc$location)
+location.labs <- c("Mesh enclosure","Tank corner")
+names(location.labs) <- c("conweb","tank corner")
+
+plot_season_loc <- ggplot(shed_summ_loc,aes(x=as.factor(month),y=mean_shed,group=species))+
+  geom_point(aes(color=species),size=3,position=position_dodge(.2))+
+  geom_line(aes(color=species),size=1,position=position_dodge(.2))+
+  geom_errorbar(aes(ymin=mean_shed-se_shed, ymax=mean_shed+se_shed,color=species), size=0.4, width=.2,position=position_dodge(.2))+
+  scale_color_manual(values=c("lightgoldenrod2","lightsteelblue3"),labels=c("Stegostoma fasciatum","Sphyrna tiburo"))+
+  labs(x="Deployment month",y=expression(paste("Denticles shed shark"^"-1"," day"^"-1"," m"^"-2")),color="Species")+
+  theme_bw()+
+  scale_x_discrete(limits=c("July", "August", "September","October","January","February"),labels=c("Jun-Jul", "Jul-Aug", "Aug-Sept","Sept-Oct","Jan-Feb","Feb-Mar"))+
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())+
+  theme(axis.text = element_text(size=12),axis.title= element_text(size=16))+
+  theme(legend.text = element_text(size=12),legend.title = element_text(size=14))+
+  theme(axis.text=element_text(color="black",family="sans",hjust=0.5),axis.title= element_text(color="black",family="sans",hjust=0.5))+
+  theme(legend.text=element_text(face="italic"))+
+  theme(legend.position = "bottom")+
+  theme(aspect.ratio = 0.8)+
+  facet_wrap(~location,labeller=labeller(location=location.labs))+
+  theme(strip.text.x = element_text(size = 16,color="black",face="bold"))+
+  theme(strip.background = element_rect(color="black", fill="white", size=0,linetype="blank"))
+plot_season_loc
+
+```
+
+## Fig. S7
+```{r fig.height=5}
+
+median(aop_taph_sc$tot_frag_score) 
+
+taph_morph_frag <- ggplot(aop_taph_sc,aes(x = func_morph,y=tot_frag_score))+
+  geom_hline(yintercept=1,linetype="dashed", color = "gray30")+ #median
+  stat_boxplot(geom = "errorbar", width = 0.1) +
+  geom_boxplot()+
+  geom_jitter(color='gray60',alpha=0.6)+
+  stat_summary(fun.y=mean, geom="point", shape=18, size=3, color="black", fill="black") +
+  labs(x="Deployment",y="Weathering score")+
+  theme_bw()+
+  labs(x="Functional morphotype",y="Weathering score")+
+  scale_x_discrete(limits=c("ABR","RA", "DR","GF"),labels=c("Abrasion \nstrength","Ridged abrasion \nstrength","Drag \nreduction","Generalized \nfunctions"))+
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())+
+  theme(axis.text = element_text(size=12),axis.title= element_text(size=16))+
+  theme(legend.text = element_text(size=12),legend.title = element_text(size=14))+
+  theme(axis.text=element_text(color="black",family="sans",hjust=0.5),axis.title= element_text(color="black",family="sans",hjust=0.5))+
+  theme(legend.position = "none")+
+  scale_y_continuous(breaks=seq(0,5,0.5))+
+  theme(aspect.ratio = 0.8)
+taph_morph_frag
+
+```
+
+## Fig. S8
+```{r fig.width=8}
+
+#set up data
+focalfol_join_long_activ <- focalfol_join %>% 
+  mutate(perc_T_activ=prop_T_activ*100,
+         perc_RB_activ=prop_RB_activ*100) %>% 
+  select(id,month,species,time_of_day,perc_T_activ,perc_RB_activ) %>% 
+  gather(perc_T_activ,perc_RB_activ,key=activ_g,value=perc)
+
+summary_activ_time <- focalfol_join_long_activ %>% 
+  group_by(activ_g,time_of_day,species) %>% 
+  summarize(abund_mean=mean(perc, na.rm=T), 
+            abund_sd=sd(perc, na.rm=T),
+            abund_stderr=std.error(perc, na.rm=T))
+
+#labels
+spp.labs <- c("Stegostoma fasciatum","Sphyrna tiburo")
+names(spp.labs) <- c("fasciatum","tiburo")
+summary_activ_time$species <- factor(summary_activ_time$species, levels = c("fasciatum","tiburo"))
+
+#plot
+activ_barplot_time <- ggplot(data=summary_activ_time, aes(x=time_of_day, y=abund_mean, fill=activ_g)) +
+  geom_bar(stat = "identity",position="dodge")+
+  geom_errorbar(aes(ymin=abund_mean-abund_stderr, ymax=abund_mean+abund_stderr), width=.2,
+                 position=position_dodge(.9))+
+  theme_bw()+
+  labs(x="Time of Day",y="Percent of Observations (%)",fill="Activity State") +
+  scale_fill_manual(values=c("gray80","gray20"),labels=c("Resting on Tank Bottom","Traveling"))+
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())+
+  theme(axis.text = element_text(size=12),axis.title= element_text(size=16))+
+  theme(legend.text = element_text(size=12),legend.title = element_text(size=14))+
+  theme(axis.text=element_text(color="black",family="sans",hjust=0.5),axis.title= element_text(color="black",family="sans",hjust=0.5))+
+  theme(legend.position="bottom")+
+  theme(aspect.ratio = 1.3)+
+  facet_wrap(~species,
+             labeller=labeller(species=spp.labs),
+             ncol=2)+
+  theme(strip.text.x = element_text(size=14, face="bold.italic"))+
+  theme(strip.background = element_rect(color="black", fill="white", size=0,linetype="blank"))
+activ_barplot_time
+
+```
+
+## Fig. S9
+```{r fig.width=9}
+
+#set up data
+summary_activ_time_mo <- focalfol_join_long_activ %>% 
+  group_by(activ_g,time_of_day,month,species) %>% 
+  summarize(abund_mean=mean(perc, na.rm=T), 
+            abund_sd=sd(perc, na.rm=T),
+            abund_stderr=std.error(perc, na.rm=T))
+summary_activ_time_mo
+
+#labels
+spp.labs <- c("Stegostoma fasciatum","Sphyrna tiburo")
+names(spp.labs) <- c("fasciatum","tiburo")
+summary_activ_time_mo$species <- factor(summary_activ_time_mo$species, levels = c("fasciatum","tiburo"))
+summary_activ_time_mo$month <- factor(summary_activ_time_mo$month, levels = c("October","November","December","February"))
+
+#plot
+activ_barplot_time_mo <- ggplot(data=summary_activ_time_mo, aes(x=time_of_day, y=abund_mean, fill=activ_g)) +
+  geom_bar(stat = "identity",position="dodge")+
+  geom_errorbar(aes(ymin=abund_mean-abund_stderr, ymax=abund_mean+abund_stderr), width=.2,
+                 position=position_dodge(.9))+
+  theme_bw()+
+  labs(x="Time of day",y="Percent of observations (%)",fill="Activity state") +
+  scale_fill_manual(values=c("gray80","gray20"),labels=c("Resting on tank bottom","Traveling"))+
+  theme(axis.text = element_text(size=12),axis.title= element_text(size=16))+
+  theme(axis.text=element_text(color="black",family="sans"),axis.title= element_text(color="black",family="sans"))+
+  theme(axis.title.x = element_text(vjust=-0.4))+
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())+ 
+  facet_grid(month~species,labeller=labeller(species=spp.labs))+
+  theme(strip.background.x = element_rect(color="black", fill="white", size=0,linetype="blank"),
+        strip.background.y = element_rect(color="black", fill="gray95"))+
+  theme(strip.text.x = element_text(size=16, face="bold.italic"))
+activ_barplot_time_mo
+
+```
+
+## Fig. S10
+```{r fig.height=5}
+
+my_breaks = c(0.33, 1, 3)
+my_labels=c(0.33,1.00,3.00)
+
+
+sim_plot_finalv2 <- output_df_func_ratio %>% 
+  filter(z>=1 & b>=1) %>% 
+  ggplot(aes(x=z,y=b))+
+  geom_point(aes(fill=ratio_dr_abr_ra_comb,size=dt),shape=21,color="gray20")+
+  geom_tile(aes(x=3,y=2),color="black",fill=NA,linetype='dashed',size=0.5)+
+  geom_contour(aes(z=ratio_dr_abr_ra_comb),color="gray20",breaks=c(1))+
+  labs(x="Zebra shark abundance \n(Slow shedding)",y="Bonnethead shark abundance \n(Fast shedding)",fill="Drag reduction:abrasion ratio",size="Denticle accumulation")+
+  scale_fill_gradient2(midpoint=0, low="blue", mid="white",
+                     high="red", space ="Lab",trans='log',na.value = "white",breaks=my_breaks,labels=my_labels)+
+  scale_size_continuous(range=c(0.3,9))+
+  theme_bw()+
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())+
+  theme(axis.text = element_text(size=12),axis.title= element_text(size=16))+
+  theme(legend.text = element_text(size=12),legend.title = element_text(size=14))+
+  theme(axis.text=element_text(color="black",family="sans",hjust=0.5),axis.title= element_text(color="black",family="sans",hjust=0.5))+
+  scale_x_continuous(breaks=c(1,3,5,7,9))+
+  scale_y_continuous(breaks=c(1,3,5,7,9))+
+  theme(aspect.ratio = 1)
+sim_plot_finalv2
+
+```
