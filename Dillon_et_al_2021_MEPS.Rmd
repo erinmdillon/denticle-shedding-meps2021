@@ -190,7 +190,7 @@ aop_taph_sc <- aop_taph %>%
 ## Behavior data
 ```{r}
 
-focalfol <- read.csv(here:here("5_DillonMEPS2021_SupData_Denticle_Shedding_behavior.csv"),na.strings=".", header=TRUE)
+focalfol <- read.csv(here:here("5_DillonMEPS2021_SupData_Denticle_Shedding_behavior.csv"),na.strings=".", header=T)
 
 #survey metadata
 focalfol_meta <- focalfol %>% 
