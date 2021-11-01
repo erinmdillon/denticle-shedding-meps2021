@@ -1,2 +1,2 @@
 # denticle-shedding-meps2021
-shark dermal denticle shedding rate data processing and analysis
+Code and data to reproduce analyses in Dillon et al. (2021) Dermal denticle shedding rates vary between two captive shark species. Marine Ecology Progress Series. https://doi.org/10.3354/meps13936
