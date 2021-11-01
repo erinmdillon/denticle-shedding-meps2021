@@ -13,6 +13,7 @@ Paper citation: Dillon et al. (2021) Dermal denticle shedding rates vary between
 
 
 ```{r setup, include=FALSE}
+
 knitr::opts_chunk$set(echo = TRUE)
 
 ```
@@ -297,7 +298,7 @@ aictab(list(mod1_spp,mod_null_spp), c("mod1","null"))
 anova(mod1_spp,mod_null_spp)
 summary(mod1_spp)
 
-#check diagmostics
+#check diagnostics
 mod1_spp_sim <- simulateResiduals(mod1_spp,n=1000)
 plot(mod1_spp_sim)
 
@@ -796,7 +797,7 @@ plot(mod5_vpos_sim)
 ### Model: total contact with the tank
 ```{r}
 
-#counts by survey id
+#interaction counts by survey id
 focalfol_int <- focalfol %>%
   mutate(rubbing_tot=rubbing_reef+rubbing_walls+rubbing_bot) %>% 
   group_by(id,species,time_of_day,date,tot_time_min,dive_show) %>% 
@@ -1168,6 +1169,59 @@ plot_season_loc <- ggplot(shed_summ_loc,aes(x=as.factor(month),y=mean_shed,group
   theme(strip.text.x = element_text(size = 16,color="black",face="bold"))+
   theme(strip.background = element_rect(color="black", fill="white", size=0,linetype="blank"))
 plot_season_loc
+
+```
+
+## Fig. S6
+```{r fig.width=11}
+
+#all relevant data reported in text - insert into a tibble
+comp <- tribble(
+  ~species, ~func_morph, ~assemb_type, ~perc_mean, ~perc_se,
+  "bonnethead", 'drag', "tray", 84.5, 0.8,
+  "bonnethead", 'rdgabr', "tray", 4.8, 0.48,
+  "bonnethead", 'abr', "tray", 7.3, 0.84,
+  "bonnethead", 'gf', "tray", 3.4, 0.46,
+  "bonnethead", 'drag', "ref col", 93.8, 4.8,
+  "bonnethead", 'rdgabr', "ref col", 2.4, 2.4,
+  "bonnethead", 'abr', "ref col", 2.8, 1.4,
+  "bonnethead", 'gf', "ref col", 1, 1,
+  "zebra", 'drag', "tray", 0, 0,
+  "zebra", 'rdgabr', "tray", 85.3, 1.04,
+  "zebra", 'abr', "tray", 7.3, 0.68,
+  "zebra", 'gf', "tray", 7.4, 0.74,
+  "zebra", 'drag', "ref col", 0, NA,
+  "zebra", 'rdgabr', "ref col", 86.4, NA,
+  "zebra", 'abr', "ref col", 5.3, NA,
+  "zebra", 'gf', "ref col", 8.3, NA,
+)
+comp
+
+#plot
+spp.labs.comp <- c("Stegostoma fasciatum","Sphyrna tiburo")
+names(spp.labs.comp) <- c("zebra","bonnethead")
+
+perc_abund_comparison <- ggplot(comp, aes(x=func_morph, y=perc_mean,fill=assemb_type))+
+  geom_bar(aes(fill=assemb_type),stat="identity",position="dodge")+
+  geom_errorbar(aes(ymin=perc_mean-perc_se, ymax=perc_mean+perc_se), width=.2,
+                 position=position_dodge(.9))+
+  theme_bw()+
+  scale_x_discrete(limits=c("drag","rdgabr","abr","gf"),labels=c("Drag\nreduction\n","Ridged\nabrasion\nstrength","Abrasion\nstrength\n","Generalized\nfunctions\n"))+
+  scale_fill_manual(values=c("gray20","gray80"),labels=c("Reference collection","Experimental trays"))+
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())+
+  theme(axis.text = element_text(size=12),axis.title= element_text(size=16))+
+  theme(legend.text = element_text(size=12),legend.title = element_text(size=14))+
+  theme(axis.text=element_text(color="black",family="sans",hjust=0.5),axis.title= element_text(color="black",family="sans",hjust=0.5))+
+  theme(axis.title.x = element_text(vjust=-0.4))+
+  labs(x="Functional morphotype",y="Abundance (%)",fill="Sample type")+
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())+
+  theme(aspect.ratio=0.75)+
+  facet_wrap(~species,
+             labeller=labeller(species=spp.labs.comp),
+             ncol=2)+
+  theme(strip.text.x = element_text(size=16, face="bold.italic"))+
+  theme(strip.background = element_rect(color="black", fill="white", size=0,linetype="blank"))
+perc_abund_comparison
 
 ```
 
