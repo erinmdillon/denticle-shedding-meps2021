@@ -15,8 +15,6 @@ Paper citation: Dillon et al. (2021) Dermal denticle shedding rates vary between
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 
-knitr::opts_knit$set(root.dir = "C:/Users/erin_/Documents/UCSB PhD/Manuscripts/AOP denticle shedding/Dryad data archiving/DillonMEPS2021_SupData_Denticle_Shedding_csv_files")
-
 ```
 
 # Load libraries
@@ -33,15 +31,16 @@ library(userfriendlyscience)
 library(tidyverse)
 library(RColorBrewer)
 library(scales)
+library(here)
 
 ```
 
 # Load data
-read.csv(here::here("ChangesInRedList","rl_status_history_2007_2018_genuine.csv"))
+
 ## Denticle shedding data
 ```{r}
 
-shed_raw <- read.csv("1_DillonMEPS2021_SupData_Denticle_Shedding_counts.csv",header=T,na.strings = ".")
+shed_raw <- read.csv(here::here("1_DillonMEPS2021_SupData_Denticle_Shedding_counts.csv"),header=T,na.strings = ".")
 
 
 #shark surface area estimated as ellisoid (m2)
@@ -177,7 +176,7 @@ shed_long_tot_corr$month <- factor(shed_long_tot_corr$month, levels = c("July", 
 ## Weathering score data
 ```{r}
 
-aop_taph <- read.csv("2_DillonMEPS2021_SupData_Denticle_Shedding_weathering.csv",header=T,na.strings=".")
+aop_taph <- read.csv(here::here("2_DillonMEPS2021_SupData_Denticle_Shedding_weathering.csv"),header=T,na.strings=".")
  
 #calculate total weathering scores (each individual score is equally weighted prior to being summed)
 aop_taph_sc <- aop_taph %>% 
@@ -190,7 +189,7 @@ aop_taph_sc <- aop_taph %>%
 ## Behavior data
 ```{r}
 
-focalfol <- read.csv("5_DillonMEPS2021_SupData_Denticle_Shedding_behavior.csv",na.strings=".", header=TRUE)
+focalfol <- read.csv(here:here("5_DillonMEPS2021_SupData_Denticle_Shedding_behavior.csv"),na.strings=".", header=TRUE)
 
 #survey metadata
 focalfol_meta <- focalfol %>% 
