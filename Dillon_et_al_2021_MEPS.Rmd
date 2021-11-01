@@ -7,7 +7,7 @@ output: html_document
 
 This .Rmd file accompanies the following dataset and paper:
 
-Dataset citation: Dillon, Erin et al. (2021), Data from: Dermal denticle shedding rates vary between two captive shark species, Dryad, Dataset
+Dataset citation: Dillon, Erin et al. (2021), Data from: Dermal denticle shedding rates vary between two captive shark species, Dryad, Dataset. https://doi.org/10.25349/D9K32M 
 
 Paper citation: Dillon et al. (2021) Dermal denticle shedding rates vary between two captive shark species. Marine Ecology Progress Series. https://doi.org/10.3354/meps13936
 
@@ -190,7 +190,7 @@ aop_taph_sc <- aop_taph %>%
 ## Behavior data
 ```{r}
 
-focalfol <- read.csv(here:here("5_DillonMEPS2021_SupData_Denticle_Shedding_behavior.csv"),na.strings=".", header=T)
+focalfol <- read.csv(here::here("5_DillonMEPS2021_SupData_Denticle_Shedding_behavior.csv"), header=T,na.strings=".")
 
 #survey metadata
 focalfol_meta <- focalfol %>% 
